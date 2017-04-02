@@ -42,6 +42,7 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.Text (Text)
 import Data.Traversable (for)
 
 import Language.PureScript.AST
@@ -52,7 +53,6 @@ import Language.PureScript.Kinds
 import Language.PureScript.Names
 import Language.PureScript.Traversals
 import Language.PureScript.TypeChecker.Entailment
-import Language.PureScript.TypeChecker.Kinds
 import Language.PureScript.TypeChecker.Monad
 import Language.PureScript.TypeChecker.Skolems
 import Language.PureScript.TypeChecker.Subsumption
@@ -232,8 +232,9 @@ checkTypedBindingGroupElement
   -> m (Ident, (Expr, Type))
 checkTypedBindingGroupElement mn (ident, (val, ty, checkType)) dict = do
   -- Kind check
-  (kind, args) <- kindOfWithScopedVars ty
-  checkTypeKind ty kind
+  -- (kind, args) <- kindOfWithScopedVars ty
+  let args = getScopedVars ty
+  -- checkTypeKind ty kind
   -- We replace type synonyms _after_ kind-checking, since we don't want type
   -- synonym expansion to bring type variables into scope. See #2542.
   ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms $ ty
@@ -242,6 +243,12 @@ checkTypedBindingGroupElement mn (ident, (val, ty, checkType)) dict = do
             then withScopedTypeVars mn args $ bindNames dict $ check val ty'
             else return (TypedValue False val ty')
   return (ident, (val', ty'))
+
+-- | Infer the kind of a single type, returning the kinds of any scoped type variables
+getScopedVars :: Type -> [(Text, Kind)]
+getScopedVars (ForAll ident ty _) = (ident, kindType) : getScopedVars ty
+getScopedVars (KindedType ty _) = getScopedVars ty
+getScopedVars _ = []
 
 -- | Infer a type for a value in a binding group which lacks an annotation.
 typeForBindingGroupElement
@@ -260,12 +267,12 @@ typeForBindingGroupElement (ident, (val, ty)) dict = do
   return (ident, (TypedValue True val' ty', ty'))
 
 -- | Check the kind of a type, failing if it is not of kind *.
-checkTypeKind
-  :: MonadError MultipleErrors m
-  => Type
-  -> Kind
-  -> m ()
-checkTypeKind ty kind = guardWith (errorMessage (ExpectedType ty kind)) $ kind == kindType
+-- checkTypeKind
+--   :: MonadError MultipleErrors m
+--   => Type
+--   -> Kind
+--   -> m ()
+-- checkTypeKind ty kind = guardWith (errorMessage (ExpectedType ty kind)) $ kind == kindType
 
 -- | Remove any ForAlls and ConstrainedType constructors in a type by introducing new unknowns
 -- or TypeClassDictionary values.
@@ -396,8 +403,9 @@ infer' (DeferredDictionary className tys) = do
              (foldl TypeApp (TypeConstructor (fmap coerceProperName className)) tys)
 infer' (TypedValue checkType val ty) = do
   Just moduleName <- checkCurrentModule <$> get
-  (kind, args) <- kindOfWithScopedVars ty
-  checkTypeKind ty kind
+  -- (kind, args) <- kindOfWithScopedVars ty
+  let args = getScopedVars ty
+  -- checkTypeKind ty kind
   ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty
   val' <- if checkType then withScopedTypeVars moduleName args (check val ty') else return val
   return $ TypedValue True val' ty'
@@ -422,8 +430,9 @@ inferLetBinding
 inferLetBinding seen [] ret j = (,) seen <$> withBindingGroupVisible (j ret)
 inferLetBinding seen (ValueDeclaration ident nameKind [] [MkUnguarded tv@(TypedValue checkType val ty)] : rest) ret j = do
   Just moduleName <- checkCurrentModule <$> get
-  (kind, args) <- kindOfWithScopedVars ty
-  checkTypeKind ty kind
+  -- (kind, args) <- kindOfWithScopedVars ty
+  let args = getScopedVars ty
+  -- checkTypeKind ty kind
   let dict = M.singleton (Qualified Nothing ident) (ty, nameKind, Undefined)
   ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty
   TypedValue _ val' ty'' <- if checkType then withScopedTypeVars moduleName args (bindNames dict (check val ty')) else return tv
@@ -504,8 +513,8 @@ inferBinder val (NamedBinder name binder) = do
 inferBinder val (PositionedBinder pos _ binder) =
   warnAndRethrowWithPositionTC pos $ inferBinder val binder
 inferBinder val (TypedBinder ty binder) = do
-  kind <- kindOf ty
-  checkTypeKind ty kind
+  -- kind <- kindOf ty
+  -- checkTypeKind ty kind
   ty1 <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty
   unifyTypes val ty1
   inferBinder ty1 binder
@@ -665,8 +674,8 @@ check' (DeferredDictionary className tys) ty = do
              (TypeClassDictionary (Constraint className tys Nothing) dicts hints)
              ty
 check' (TypedValue checkType val ty1) ty2 = do
-  kind <- kindOf ty1
-  checkTypeKind ty1 kind
+  -- kind <- kindOf ty1
+  -- checkTypeKind ty1 kind
   ty1' <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty1
   ty2' <- introduceSkolemScope <=< replaceAllTypeSynonyms <=< replaceTypeWildcards $ ty2
   elaborate <- subsumes ty1' ty2'
@@ -716,8 +725,8 @@ check' v@(Constructor c) ty = do
 check' (Let ds val) ty = do
   (ds', val') <- inferLetBinding [] ds val (`check` ty)
   return $ TypedValue True (Let ds' val') ty
-check' val kt@(KindedType ty kind) = do
-  checkTypeKind ty kind
+check' val kt@(KindedType ty _kind) = do
+  -- checkTypeKind ty kind
   val' <- check' val ty
   return $ TypedValue True val' kt
 check' (PositionedValue pos c val) ty = warnAndRethrowWithPositionTC pos $ do

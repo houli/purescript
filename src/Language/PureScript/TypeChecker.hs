@@ -233,16 +233,18 @@ typeCheckAll moduleName _ = traverse go
     warnAndRethrow (addHint (ErrorInTypeConstructor name)) $ do
       when (dtype == Newtype) $ checkNewtype name dctors
       checkDuplicateTypeArguments $ map fst args
-      ctorKind <- kindsOf True moduleName name args (concatMap snd dctors)
-      let args' = args `withKinds` ctorKind
-      addDataType moduleName dtype name args' dctors ctorKind
+      -- ctorKind <- kindsOf True moduleName name args (concatMap snd dctors)
+      -- let args' = args `withKinds` ctorKind
+      -- addDataType moduleName dtype name args' dctors ctorKind
+      addDataType moduleName dtype name args dctors kindType
     return $ DataDeclaration dtype name args dctors
   go (d@(DataBindingGroupDeclaration tys)) = do
     let syns = mapMaybe toTypeSynonym tys
         dataDecls = mapMaybe toDataDecl tys
         bindingGroupNames = ordNub ((syns^..traverse._1) ++ (dataDecls^..traverse._2))
     warnAndRethrow (addHint (ErrorInDataBindingGroup bindingGroupNames)) $ do
-      (syn_ks, data_ks) <- kindsOfAll moduleName syns (map (\(_, name, args, dctors) -> (name, args, concatMap snd dctors)) dataDecls)
+      -- (syn_ks, data_ks) <- kindsOfAll moduleName syns (map (\(_, name, args, dctors) -> (name, args, concatMap snd dctors)) dataDecls)
+      (syn_ks, data_ks) <- pure (repeat kindType, repeat kindType)
       for_ (zip dataDecls data_ks) $ \((dtype, name, args, dctors), ctorKind) -> do
         when (dtype == Newtype) $ checkNewtype name dctors
         checkDuplicateTypeArguments $ map fst args
@@ -263,9 +265,10 @@ typeCheckAll moduleName _ = traverse go
   go (TypeSynonymDeclaration name args ty) = do
     warnAndRethrow (addHint (ErrorInTypeSynonym name)) $ do
       checkDuplicateTypeArguments $ map fst args
-      kind <- kindsOf False moduleName name args [ty]
-      let args' = args `withKinds` kind
-      addTypeSynonym moduleName name args' ty kind
+      -- kind <- kindsOf False moduleName name args [ty]
+      -- let args' = args `withKinds` kind
+      -- addTypeSynonym moduleName name args' ty kind
+      addTypeSynonym moduleName name args ty kindType
     return $ TypeSynonymDeclaration name args ty
   go TypeDeclaration{} =
     internalError "Type declarations should have been removed before typeCheckAlld"
@@ -305,8 +308,8 @@ typeCheckAll moduleName _ = traverse go
   go (d@(ExternDeclaration name ty)) = do
     warnAndRethrow (addHint (ErrorInForeignImport name)) $ do
       env <- getEnv
-      kind <- kindOf ty
-      guardWith (errorMessage (ExpectedType ty kind)) $ kind == kindType
+      -- kind <- kindOf ty
+      -- guardWith (errorMessage (ExpectedType ty kind)) $ kind == kindType
       case M.lookup (Qualified (Just moduleName) name) (names env) of
         Just _ -> throwError . errorMessage $ RedefinedIdent name
         Nothing -> putEnv (env { names = M.insert (Qualified (Just moduleName) name) (ty, External, Defined) (names env) })
